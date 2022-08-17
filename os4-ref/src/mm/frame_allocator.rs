@@ -54,6 +54,10 @@ impl StackFrameAllocator {
         self.current = l.0;
         self.end = r.0;
     }
+
+    pub fn get_allocatable_number(&self) -> usize {
+        self.end - self.current + self.recycled.len()
+    }
 }
 impl FrameAllocator for StackFrameAllocator {
     fn new() -> Self {
@@ -114,6 +118,10 @@ pub fn frame_alloc() -> Option<FrameTracker> {
 /// deallocate a frame
 fn frame_dealloc(ppn: PhysPageNum) {
     FRAME_ALLOCATOR.exclusive_access().dealloc(ppn);
+}
+
+pub fn get_allocatable_number() -> usize {
+    FRAME_ALLOCATOR.exclusive_access().get_allocatable_number()
 }
 
 #[allow(unused)]

@@ -18,7 +18,7 @@ use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 
-use crate::config::MAX_SYSCALL_NUM;
+use crate::config::{MAX_SYSCALL_NUM, PAGE_SIZE};
 
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -28,7 +28,7 @@ pub use task::{TaskControlBlock, TaskStatus};
 pub use context::TaskContext;
 use crate::timer::{get_time, get_time_ms};
 
-use crate::mm::{VirtAddr};
+use crate::mm::{VirtAddr, get_allocatable_number};
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -145,6 +145,10 @@ impl TaskManager {
     }
 
     fn map_current_memory_set(&self, _start: usize, _len: usize, _port: usize) -> bool {
+        let need_page_num = (_len + PAGE_SIZE - 1) / PAGE_SIZE;
+        if get_allocatable_number() < need_page_num {
+            return false;
+        }
         let start_va = VirtAddr::from(_start);
         let end_va = VirtAddr::from(_start + _len);
         let mut inner = self.inner.exclusive_access();
