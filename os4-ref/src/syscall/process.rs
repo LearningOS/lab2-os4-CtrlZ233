@@ -1,8 +1,13 @@
 //! Process management syscalls
 
-use crate::config::MAX_SYSCALL_NUM;
-use crate::task::{exit_current_and_run_next, suspend_current_and_run_next, TaskStatus};
-use crate::timer::get_time_us;
+use crate::config::{MAX_SYSCALL_NUM, PAGE_SIZE_BITS};
+use crate::mm::translated_refmut;
+use crate::task::{current_user_token, exit_current_and_run_next, suspend_current_and_run_next,
+                  TaskStatus, get_current_start_time, get_current_syscall_time, map_current_memory_set,
+                  unmap_current_memory_set
+};
+use crate::task::TaskStatus::Running;
+use crate::timer::{get_time_ms, get_time_us};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -33,12 +38,12 @@ pub fn sys_yield() -> isize {
 // YOUR JOB: 引入虚地址后重写 sys_get_time
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     let _us = get_time_us();
-    // unsafe {
-    //     *ts = TimeVal {
-    //         sec: us / 1_000_000,
-    //         usec: us % 1_000_000,
-    //     };
-    // }
+    // println!("[kernel] _us: {}", _us);
+    let token = current_user_token();
+    *translated_refmut(token, _ts) = TimeVal {
+        sec: _us / 1_000_000,
+        usec: _us % 1_000_000,
+    };
     0
 }
 
@@ -49,14 +54,37 @@ pub fn sys_set_priority(_prio: isize) -> isize {
 
 // YOUR JOB: 扩展内核以实现 sys_mmap 和 sys_munmap
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+    // 页对齐
+    if _start & ((1 << (PAGE_SIZE_BITS)) - 1) != 0 {
+        return -1;
+    }
+    if (_port & !0x7 != 0) || (_port & 0x7 == 0) {
+        return -1;
+    }
+    if map_current_memory_set(_start, _len, _port) {
+        return 0;
+    }
     -1
 }
 
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+    // 页对齐
+    if _start & ((1 << (PAGE_SIZE_BITS)) - 1) != 0 {
+        return -1;
+    }
+    if unmap_current_memory_set(_start, _len) {
+        return 0;
+    }
     -1
 }
 
 // YOUR JOB: 引入虚地址后重写 sys_task_info
 pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
-    -1
+    let token = current_user_token();
+    *translated_refmut(token, ti) = TaskInfo {
+        status: Running,
+        syscall_times: get_current_syscall_time(),
+        time: get_time_ms() - get_current_start_time(),
+    };
+    0
 }

@@ -17,12 +17,18 @@ mod task;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
+
+use crate::config::MAX_SYSCALL_NUM;
+
 use alloc::vec::Vec;
 use lazy_static::*;
 pub use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
+use crate::timer::{get_time, get_time_ms};
+
+use crate::mm::{VirtAddr};
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -79,6 +85,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
+        next_task.exec_start_time = get_time_ms();
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -127,6 +134,49 @@ impl TaskManager {
         inner.tasks[inner.current_task].get_trap_cx()
     }
 
+    fn get_current_start_time(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].exec_start_time
+    }
+
+    fn get_current_syscall_time(&self) -> [u32; MAX_SYSCALL_NUM] {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].syscall_times
+    }
+
+    fn map_current_memory_set(&self, _start: usize, _len: usize, _port: usize) -> bool {
+        let start_va = VirtAddr::from(_start);
+        let end_va = VirtAddr::from(_start + _len);
+        let mut inner = self.inner.exclusive_access();
+        let current_index = inner.current_task;
+        let mem_set = &mut inner.tasks[current_index].memory_set;
+
+        if mem_set.is_mem_area_exists(start_va, end_va) {
+            return false;
+        }
+
+        mem_set.insert_framed_area_in_user(start_va, end_va, _port);
+
+        true
+    }
+
+    fn unmap_current_memory_set(&self, _start: usize, _len: usize) -> bool {
+        let start_va = VirtAddr::from(_start);
+        let end_va = VirtAddr::from(_start + _len);
+        let mut inner = self.inner.exclusive_access();
+        let current_index = inner.current_task;
+        let mem_set = &mut inner.tasks[current_index].memory_set;
+
+        if mem_set.is_mem_area_not_exists(start_va, end_va) {
+            return false
+        }
+
+        mem_set.dealloc_framed_area(start_va, end_va);
+
+        true
+    }
+
+
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
@@ -135,6 +185,9 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             inner.current_task = next;
+            if inner.tasks[next].exec_start_time == 0 {
+                inner.tasks[next].exec_start_time = get_time_ms();
+            }
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
@@ -146,6 +199,13 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    fn inc_syscall_time(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current_index = inner.current_task;
+        let current_task =  &mut inner.tasks[current_index];
+        current_task.syscall_times[syscall_id] += 1;
     }
 }
 
@@ -191,3 +251,28 @@ pub fn current_user_token() -> usize {
 pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
 }
+
+pub fn get_current_start_time() -> usize {
+    TASK_MANAGER.get_current_start_time()
+}
+
+pub fn get_current_syscall_time() -> [u32; MAX_SYSCALL_NUM] {
+    TASK_MANAGER.get_current_syscall_time()
+}
+
+pub fn inc_syscall_time(syscall_id: usize) {
+    if syscall_id > MAX_SYSCALL_NUM {
+        panic!("Unsupported syscall_id: {}", syscall_id);
+    }
+    TASK_MANAGER.inc_syscall_time(syscall_id);
+}
+
+pub fn map_current_memory_set(_start: usize, _len: usize, _port: usize) -> bool {
+    TASK_MANAGER.map_current_memory_set(_start, _len, _port)
+}
+
+pub fn unmap_current_memory_set(_start: usize, _len: usize) -> bool {
+    TASK_MANAGER.unmap_current_memory_set(_start, _len)
+}
+
+

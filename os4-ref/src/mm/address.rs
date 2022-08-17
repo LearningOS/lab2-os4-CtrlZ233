@@ -139,6 +139,15 @@ impl From<PhysPageNum> for PhysAddr {
     }
 }
 
+impl PhysAddr {
+    pub fn get_ref<T>(&self) -> &'static T {
+        unsafe { (self.0 as *const T).as_ref().unwrap() }
+    }
+    pub fn get_mut<T>(&self) -> &'static mut T {
+        unsafe { (self.0 as *mut T).as_mut().unwrap() }
+    }
+}
+
 impl VirtPageNum {
     pub fn indexes(&self) -> [usize; 3] {
         let mut vpn = self.0;
@@ -175,7 +184,7 @@ impl StepByOne for VirtPageNum {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 /// a simple range structure for type T
 pub struct SimpleRange<T>
 where
