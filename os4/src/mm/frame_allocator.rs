@@ -71,6 +71,7 @@ impl FrameAllocator for StackFrameAllocator {
         if let Some(ppn) = self.recycled.pop() {
             Some(ppn.into())
         } else if self.current == self.end {
+            println!("test err");
             None
         } else {
             self.current += 1;
